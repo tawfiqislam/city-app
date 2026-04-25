@@ -5,11 +5,13 @@ const prisma = new PrismaClient()
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
+
     const report = await prisma.report.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         user: { select: { name: true, email: true } },
         department: { select: { name: true } },
@@ -22,7 +24,10 @@ export async function GET(
     })
 
     if (!report) {
-      return NextResponse.json({ error: "Report not found" }, { status: 404 })
+      return NextResponse.json(
+        { error: "Report not found" },
+        { status: 404 }
+      )
     }
 
     return NextResponse.json({ report })

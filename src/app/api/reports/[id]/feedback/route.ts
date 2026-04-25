@@ -7,12 +7,17 @@ const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key"
 
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
+
     const authHeader = request.headers.get("authorization")
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      )
     }
 
     const token = authHeader.split(" ")[1]
@@ -21,10 +26,12 @@ export async function POST(
     try {
       payload = jwt.verify(token, JWT_SECRET)
     } catch {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
+      return NextResponse.json(
+        { error: "Invalid token" },
+        { status: 401 }
+      )
     }
 
-    // Only citizens can submit ratings
     if (payload.role !== "citizen") {
       return NextResponse.json(
         { error: "Only citizens can submit ratings" },
@@ -32,7 +39,17 @@ export async function POST(
       )
     }
 
-    const { rating, feedback } = await request.json()
+    let body: any
+    try {
+      body = await request.json()
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid request body" },
+        { status: 400 }
+      )
+    }
+
+    const { rating, feedback } = body
 
     if (!rating || rating < 1 || rating > 5) {
       return NextResponse.json(
@@ -41,13 +58,15 @@ export async function POST(
       )
     }
 
-    // Check report exists and is resolved
     const report = await prisma.report.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!report) {
-      return NextResponse.json({ error: "Report not found" }, { status: 404 })
+      return NextResponse.json(
+        { error: "Report not found" },
+        { status: 404 }
+      )
     }
 
     if (report.status !== "resolved") {
@@ -57,9 +76,8 @@ export async function POST(
       )
     }
 
-    // Update rating and feedback
     const updated = await prisma.report.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         rating: Number(rating),
         feedback: feedback || null,

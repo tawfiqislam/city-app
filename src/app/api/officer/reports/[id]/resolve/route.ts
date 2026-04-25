@@ -5,14 +5,60 @@ import jwt from "jsonwebtoken"
 const prisma = new PrismaClient()
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key"
 
+function calculateAutoRating(
+  createdAt: Date,
+  resolvedAt: Date
+): { rating: number; feedback: string } {
+  const diffMs = resolvedAt.getTime() - createdAt.getTime()
+  const diffHours = diffMs / (1000 * 60 * 60)
+  const diffDays = diffHours / 24
+
+  if (diffHours <= 24) {
+    return {
+      rating: 5,
+      feedback:
+        "Issue resolved within 24 hours. Outstanding response time! The city team acted immediately.",
+    }
+  } else if (diffDays <= 3) {
+    return {
+      rating: 4,
+      feedback:
+        "Issue resolved within 3 days. Very good response time from the city team.",
+    }
+  } else if (diffDays <= 7) {
+    return {
+      rating: 3,
+      feedback:
+        "Issue resolved within a week. Acceptable response time from city services.",
+    }
+  } else if (diffDays <= 14) {
+    return {
+      rating: 2,
+      feedback:
+        "Issue took about 2 weeks to resolve. Response time could be improved.",
+    }
+  } else {
+    return {
+      rating: 1,
+      feedback:
+        "Issue took more than 2 weeks to resolve. Significant improvement needed.",
+    }
+  }
+}
+
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
+
     const authHeader = request.headers.get("authorization")
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      )
     }
 
     const token = authHeader.split(" ")[1]
@@ -21,11 +67,17 @@ export async function POST(
     try {
       payload = jwt.verify(token, JWT_SECRET)
     } catch {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
+      return NextResponse.json(
+        { error: "Invalid token" },
+        { status: 401 }
+      )
     }
 
     if (!["officer", "admin"].includes(payload.role)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      return NextResponse.json(
+        { error: "Forbidden" },
+        { status: 403 }
+      )
     }
 
     let body: any
@@ -47,16 +99,8 @@ export async function POST(
       )
     }
 
-    if (status === "resolved" && !resolvedImageUrl) {
-      return NextResponse.json(
-        { error: "Proof photo URL is required for resolution" },
-        { status: 400 }
-      )
-    }
-
-    // Check if report exists
     const existingReport = await prisma.report.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!existingReport) {
@@ -73,44 +117,57 @@ export async function POST(
       )
     }
 
-    // Prepare update data
-    const updateData: any = { status }
-    if (status === "resolved") {
-      updateData.resolvedImageUrl = resolvedImageUrl
-      updateData.resolvedAt = new Date()
-    }
+    const resolvedAt = new Date()
+    const autoRating = calculateAutoRating(
+      existingReport.createdAt,
+      resolvedAt
+    )
 
-    // Update the report
+    console.log(
+      `Auto rating for report ${id}: ${autoRating.rating} stars (resolved in ${Math.round(
+        (resolvedAt.getTime() - existingReport.createdAt.getTime()) /
+          (1000 * 60 * 60)
+      )} hours)`
+    )
+
     const report = await prisma.report.update({
-      where: { id: params.id },
-      data: updateData,
+      where: { id },
+      data: {
+        status: "resolved",
+        resolvedImageUrl: resolvedImageUrl || null,
+        resolvedAt,
+        rating: autoRating.rating,
+        feedback: autoRating.feedback,
+      },
     })
 
-    // Update assignment if it exists
     if (payload.userId) {
       await prisma.assignment.updateMany({
         where: {
-          reportId: params.id,
+          reportId: id,
           officerId: payload.userId,
         },
         data: {
-          completedAt: status === "resolved" ? new Date() : null,
+          completedAt: resolvedAt,
           notes: completionNotes || "Resolved by officer",
         },
       })
     }
 
-    console.log(`Report ${params.id} marked as ${status} by officer ${payload.userId}`)
-
     return NextResponse.json({
       success: true,
-      message: "Report status updated successfully",
+      message: "Report resolved successfully",
       report,
+      autoRating,
     })
   } catch (error: any) {
     console.error("Resolution error:", error)
     return NextResponse.json(
-      { error: "Failed to update report: " + (error.message || "Unknown error") },
+      {
+        error:
+          "Failed to update report: " +
+          (error.message || "Unknown error"),
+      },
       { status: 500 }
     )
   }
