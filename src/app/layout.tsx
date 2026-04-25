@@ -7,18 +7,26 @@ export const viewport: Viewport = {
   themeColor: "#059669",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
 }
 
 export const metadata: Metadata = {
-  title: "CityWatch - Unified Citizen Reporting System",
-  description: "Report and track city issues in real-time across Bangladesh",
+  title: "CityWatch Bangladesh - Unified Citizen Reporting System",
+  description:
+    "Report city issues like water, roads, electricity and waste problems. Track progress and rate city services across all 64 districts of Bangladesh.",
+  keywords:
+    "CityWatch, Bangladesh, citizen reporting, city issues, complaints, government services, Dhaka",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
     title: "CityWatch",
+  },
+  openGraph: {
+    title: "CityWatch Bangladesh - Unified Citizen Reporting System",
+    description:
+      "Report and track city issues in real-time across Bangladesh",
+    type: "website",
+    locale: "en_BD",
   },
   icons: {
     icon: [
@@ -50,12 +58,23 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="theme-color" content="#059669" />
         <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
-        <link
-          rel="apple-touch-icon"
-          sizes="152x152"
-          href="/icons/icon-152x152.png"
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function() {
+                  navigator.serviceWorker.register('/sw.js')
+                    .then(function(reg) {
+                      console.log('CityWatch SW registered:', reg.scope);
+                    })
+                    .catch(function(err) {
+                      console.log('CityWatch SW failed:', err);
+                    });
+                });
+              }
+            `,
+          }}
         />
-        <meta name="format-detection" content="telephone=no" />
       </head>
       <body suppressHydrationWarning>
         {children}

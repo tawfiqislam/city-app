@@ -3,7 +3,21 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import StatisticsCharts from "@/components/StatisticsCharts"
+import dynamic from "next/dynamic"
+
+// Lazy load heavy chart component for better performance
+const StatisticsCharts = dynamic(
+  () => import("@/components/StatisticsCharts"),
+  {
+    loading: () => (
+      <div className="bg-white rounded-2xl p-10 text-center border border-gray-100">
+        <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+        <p className="text-gray-500 text-sm">Loading statistics...</p>
+      </div>
+    ),
+    ssr: false,
+  }
+)
 
 interface Notice {
   id: string
@@ -66,7 +80,6 @@ export default function CitizenDashboard() {
   const [user, setUser] = useState<any>(null)
   const [authChecked, setAuthChecked] = useState(false)
 
-  // Reports state
   const [stats, setStats] = useState({
     total: 0,
     resolved: 0,
@@ -78,7 +91,6 @@ export default function CitizenDashboard() {
   const [reportsLoading, setReportsLoading] = useState(true)
   const [dbError, setDbError] = useState(false)
 
-  // Notices state
   const [notices, setNotices] = useState<Notice[]>([])
   const [noticesLoading, setNoticesLoading] = useState(true)
   const [noticesError, setNoticesError] = useState("")
@@ -86,21 +98,16 @@ export default function CitizenDashboard() {
   const [noticeFilter, setNoticeFilter] = useState("all")
   const [showAllNotices, setShowAllNotices] = useState(false)
 
-  // Push notification popup
   const [pushPopup, setPushPopup] = useState<{
     title: string
     body: string
   } | null>(null)
 
-  // FCM flags
   const [fcmSetupDone, setFcmSetupDone] = useState(false)
-  const [notificationStatus, setNotificationStatus] = useState<
-    "idle" | "requesting" | "granted" | "denied" | "error"
-  >("idle")
 
-  // ================================================
-  // AUTH CHECK — Must run first
-  // ================================================
+  // =============================================
+  // STEP 1: AUTH CHECK
+  // =============================================
   useEffect(() => {
     try {
       const userData = localStorage.getItem("user")
@@ -133,28 +140,29 @@ export default function CitizenDashboard() {
     }
   }, [router])
 
-  // ================================================
-  // FETCH DATA — After auth confirmed
-  // ================================================
+  // =============================================
+  // STEP 2: FETCH DATA after auth confirmed
+  // =============================================
   useEffect(() => {
     if (!authChecked) return
 
     fetchReports()
     fetchNotices()
 
-    // Refresh notices every 60 seconds
-    const interval = setInterval(fetchNotices, 60000)
+    const interval = setInterval(() => {
+      fetchNotices()
+    }, 60000)
+
     return () => clearInterval(interval)
   }, [authChecked])
 
-  // ================================================
-  // FCM SETUP — After auth, once only
-  // ================================================
+  // =============================================
+  // STEP 3: FCM SETUP after auth, once only
+  // =============================================
   useEffect(() => {
     if (!authChecked || fcmSetupDone) return
     setFcmSetupDone(true)
 
-    // Delay slightly so page renders first
     const timer = setTimeout(() => {
       setupFCM()
     }, 2000)
@@ -162,21 +170,18 @@ export default function CitizenDashboard() {
     return () => clearTimeout(timer)
   }, [authChecked, fcmSetupDone])
 
-  // ================================================
+  // =============================================
   // FCM PUSH NOTIFICATION SETUP
-  // ================================================
+  // =============================================
   const setupFCM = async () => {
     try {
       if (typeof window === "undefined") return
 
       const token = localStorage.getItem("token")
-      if (!token) {
-        console.log("No token found, skipping FCM setup")
-        return
-      }
+      if (!token) return
 
       if (!("Notification" in window)) {
-        console.log("Notifications not supported")
+        console.log("Notifications not supported in this browser")
         return
       }
 
@@ -185,44 +190,31 @@ export default function CitizenDashboard() {
         return
       }
 
-      setNotificationStatus("requesting")
-      console.log("Starting FCM setup...")
+      console.log("Setting up FCM push notifications...")
 
-      // Dynamically import to avoid SSR errors
-      const {
-        requestNotificationPermission,
-        listenForForegroundMessages,
-      } = await import("@/lib/firebase-client")
+      const firebaseModule = await import("@/lib/firebase-client")
 
-      if (typeof requestNotificationPermission !== "function") {
+      const requestFn = firebaseModule.requestNotificationPermission
+      const listenFn = firebaseModule.listenForForegroundMessages
+
+      if (typeof requestFn !== "function") {
         console.error(
-          "requestNotificationPermission is not a function. Check firebase-client.ts exports."
+          "requestNotificationPermission is not exported correctly"
         )
-        setNotificationStatus("error")
         return
       }
 
-      if (typeof listenForForegroundMessages !== "function") {
+      if (typeof listenFn !== "function") {
         console.error(
-          "listenForForegroundMessages is not a function. Check firebase-client.ts exports."
+          "listenForForegroundMessages is not exported correctly"
         )
-        setNotificationStatus("error")
         return
       }
 
-      // Step 1: Get FCM token
-      const fcmToken = await requestNotificationPermission()
+      const fcmToken = await requestFn()
 
-      if (!fcmToken) {
-        console.log("No FCM token obtained (permission denied or error)")
-        setNotificationStatus("denied")
-        return
-      }
-
-      setNotificationStatus("granted")
-
-      // Step 2: Save token to database
-      try {
+      if (fcmToken) {
+        console.log("Saving FCM token to database...")
         const res = await fetch("/api/user/fcm-token", {
           method: "POST",
           headers: {
@@ -233,40 +225,39 @@ export default function CitizenDashboard() {
         })
 
         if (res.ok) {
-          console.log("FCM token saved to database successfully")
+          console.log("FCM token saved successfully")
         } else {
           const errData = await res.json().catch(() => ({}))
-          console.warn("Could not save FCM token:", errData.error)
+          console.warn("Failed to save FCM token:", errData.error)
         }
-      } catch (saveErr) {
-        console.warn("Error saving FCM token:", saveErr)
+      } else {
+        console.log(
+          "FCM token not obtained. User may have denied notifications."
+        )
       }
 
-      // Step 3: Listen for foreground push notifications
-      await listenForForegroundMessages((payload: any) => {
+      await listenFn((payload: any) => {
         console.log("Push notification received in foreground:", payload)
 
-        const title = payload.notification?.title || "Emergency Alert"
-        const body = payload.notification?.body || ""
+        setPushPopup({
+          title: payload.notification?.title || "Emergency Alert",
+          body: payload.notification?.body || "",
+        })
 
-        // Show in-app popup
-        setPushPopup({ title, body })
         setTimeout(() => setPushPopup(null), 10000)
 
-        // Immediately refresh notices list
         fetchNotices()
       })
 
-      console.log("FCM setup complete. Push notifications are active.")
+      console.log("FCM setup complete")
     } catch (err) {
       console.error("FCM setup error:", err)
-      setNotificationStatus("error")
     }
   }
 
-  // ================================================
+  // =============================================
   // FETCH REPORTS
-  // ================================================
+  // =============================================
   const fetchReports = async () => {
     try {
       const token = localStorage.getItem("token")
@@ -311,53 +302,38 @@ export default function CitizenDashboard() {
     }
   }
 
-  // ================================================
+  // =============================================
   // FETCH EMERGENCY NOTICES
-  // ================================================
+  // =============================================
   const fetchNotices = async () => {
     try {
       setNoticesError("")
 
       const res = await fetch("/api/public/emergency-notices", {
         cache: "no-store",
-        headers: {
-          "Cache-Control": "no-cache",
-        },
+        headers: { "Cache-Control": "no-cache" },
       })
 
-      console.log("Emergency notices API status:", res.status)
+      console.log("Notices API status:", res.status)
 
       const contentType = res.headers.get("content-type") || ""
       if (!contentType.includes("application/json")) {
-        const text = await res.text()
         console.error(
-          "Emergency notices API returned non-JSON:",
-          text.substring(0, 200)
-        )
-        setNoticesError(
-          "API route not found. Create src/app/api/public/emergency-notices/route.ts"
+          "Emergency notices API returned non-JSON. Make sure the route file exists."
         )
         setNoticesLoading(false)
         return
       }
 
       const data = await res.json()
+      console.log("Notices loaded:", data.notices?.length ?? 0, "items")
 
-      if (!res.ok) {
-        console.error("Notices API error:", data)
-        setNoticesError(data.error || "Failed to fetch notices")
-        setNoticesLoading(false)
-        return
-      }
-
-      if (data.success && Array.isArray(data.notices)) {
+      if (res.ok && data.notices) {
         setNotices(data.notices)
-        console.log("Emergency notices loaded:", data.notices.length)
       } else {
-        console.warn("Unexpected notices response format:", data)
-        setNotices([])
+        console.error("Notices API error:", data)
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error fetching notices:", error)
       setNoticesError("Network error fetching notices")
     } finally {
@@ -381,9 +357,9 @@ export default function CitizenDashboard() {
 
   const latestCritical = notices.find((n) => n.severity === "critical")
 
-  // ================================================
-  // SHOW LOADING WHILE AUTH IS BEING CHECKED
-  // ================================================
+  // =============================================
+  // SHOW SPINNER WHILE AUTH IS BEING CHECKED
+  // =============================================
   if (!authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -397,13 +373,13 @@ export default function CitizenDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* HEADER */}
+      {/* ==================== HEADER ==================== */}
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
               <Link href="/" className="flex items-center gap-2">
-                <span className="text-2xl">🏛️</span>
+                <span className="text-2xl" aria-hidden="true">🏛️</span>
                 <span className="text-xl font-bold text-emerald-600">
                   CityWatch
                 </span>
@@ -413,29 +389,13 @@ export default function CitizenDashboard() {
               </div>
             </div>
             <div className="flex items-center gap-4">
-              {/* Notification status indicator */}
-              {notificationStatus === "granted" && (
-                <div className="hidden md:flex items-center gap-1 px-2 py-1 bg-green-50 text-green-700 rounded-full text-xs">
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                  <span>Push On</span>
-                </div>
-              )}
-              {notificationStatus === "denied" && (
-                <div
-                  className="hidden md:flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-500 rounded-full text-xs cursor-pointer"
-                  onClick={setupFCM}
-                  title="Click to enable notifications"
-                >
-                  <span>🔕</span>
-                  <span>Enable Alerts</span>
-                </div>
-              )}
               <span className="hidden md:inline text-gray-600 text-sm font-medium">
                 {user?.name}
               </span>
               <button
                 onClick={logout}
                 className="px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition text-sm font-medium"
+                aria-label="Logout"
               >
                 Logout
               </button>
@@ -445,7 +405,7 @@ export default function CitizenDashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* WELCOME BANNER */}
+        {/* ==================== WELCOME BANNER ==================== */}
         <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl p-8 text-white mb-8">
           <div className="flex justify-between items-start">
             <div>
@@ -469,25 +429,30 @@ export default function CitizenDashboard() {
           </div>
         </div>
 
-        {/* EMERGENCY NOTICES */}
+        {/* ==================== EMERGENCY NOTICES ==================== */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center">
+              <div
+                className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center"
+                aria-hidden="true"
+              >
                 <span className="text-xl">🚨</span>
               </div>
               <div>
                 <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                   Emergency Notices
                   {notices.length > 0 && (
-                    <span className="px-2 py-0.5 bg-red-500 text-white text-xs rounded-full font-bold animate-pulse">
+                    <span
+                      className="px-2 py-0.5 bg-red-500 text-white text-xs rounded-full font-bold animate-pulse"
+                      aria-label={`${notices.length} emergency notices`}
+                    >
                       {notices.length}
                     </span>
                   )}
                 </h2>
                 <p className="text-sm text-gray-500">
-                  City-wide alerts from administration • Auto-updates every
-                  60s
+                  City-wide alerts from administration • Auto-updates every 60s
                 </p>
               </div>
             </div>
@@ -497,20 +462,26 @@ export default function CitizenDashboard() {
                 fetchNotices()
               }}
               className="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition text-sm flex items-center gap-1"
+              aria-label="Refresh emergency notices"
             >
-              <span>🔄</span>
+              <span aria-hidden="true">🔄</span>
               <span className="hidden md:inline">Refresh</span>
             </button>
           </div>
 
-          {/* Critical alert banner */}
+          {/* Critical banner */}
           {latestCritical && (
             <div
               className="bg-red-600 text-white rounded-2xl p-4 mb-4 cursor-pointer hover:bg-red-700 transition"
               onClick={() => setSelectedNotice(latestCritical)}
+              role="button"
+              aria-label={`Critical alert: ${latestCritical.title}`}
             >
               <div className="flex items-center gap-3">
-                <span className="text-3xl animate-bounce flex-shrink-0">
+                <span
+                  className="text-3xl animate-bounce flex-shrink-0"
+                  aria-hidden="true"
+                >
                   🚨
                 </span>
                 <div className="flex-1 min-w-0">
@@ -529,13 +500,22 @@ export default function CitizenDashboard() {
                     {latestCritical.message}
                   </p>
                 </div>
-                <span className="text-white/70 flex-shrink-0 text-xl">→</span>
+                <span
+                  className="text-white/70 flex-shrink-0 text-xl"
+                  aria-hidden="true"
+                >
+                  →
+                </span>
               </div>
             </div>
           )}
 
           {/* Filter tabs */}
-          <div className="flex gap-2 flex-wrap mb-4">
+          <div
+            className="flex gap-2 flex-wrap mb-4"
+            role="tablist"
+            aria-label="Filter emergency notices"
+          >
             {[
               { id: "all", label: "All", count: notices.length },
               {
@@ -556,6 +536,8 @@ export default function CitizenDashboard() {
             ].map((tab) => (
               <button
                 key={tab.id}
+                role="tab"
+                aria-selected={noticeFilter === tab.id}
                 onClick={() => {
                   setNoticeFilter(tab.id)
                   setShowAllNotices(false)
@@ -581,11 +563,10 @@ export default function CitizenDashboard() {
             </div>
           ) : noticesError ? (
             <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center">
-              <div className="text-4xl mb-2">⚠️</div>
-              <h3 className="font-bold text-red-700 mb-1">
-                Could not load notices
-              </h3>
-              <p className="text-red-600 text-sm mb-3">{noticesError}</p>
+              <div className="text-4xl mb-2" aria-hidden="true">⚠️</div>
+              <p className="text-red-700 text-sm font-medium mb-3">
+                {noticesError}
+              </p>
               <button
                 onClick={() => {
                   setNoticesLoading(true)
@@ -598,7 +579,7 @@ export default function CitizenDashboard() {
             </div>
           ) : filteredNotices.length === 0 ? (
             <div className="bg-white rounded-2xl p-8 text-center border border-gray-100">
-              <div className="text-5xl mb-3">✅</div>
+              <div className="text-5xl mb-3" aria-hidden="true">✅</div>
               <h3 className="font-bold text-gray-900 mb-1">
                 No Emergency Notices
               </h3>
@@ -607,14 +588,6 @@ export default function CitizenDashboard() {
                   ? "No emergency broadcasts sent. Your city is safe!"
                   : `No ${noticeFilter} level notices at this time.`}
               </p>
-              {noticeFilter !== "all" && (
-                <button
-                  onClick={() => setNoticeFilter("all")}
-                  className="mt-3 px-4 py-2 bg-gray-100 text-gray-600 rounded-xl text-sm hover:bg-gray-200"
-                >
-                  Show All
-                </button>
-              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -626,11 +599,14 @@ export default function CitizenDashboard() {
                     key={notice.id}
                     className={`bg-white rounded-2xl shadow-sm border-l-4 ${config.border} hover:shadow-md transition cursor-pointer`}
                     onClick={() => setSelectedNotice(notice)}
+                    role="button"
+                    aria-label={`${config.label}: ${notice.title}`}
                   >
                     <div className="p-4">
                       <div className="flex items-start gap-3">
                         <div
                           className={`w-10 h-10 ${config.bg} rounded-xl flex items-center justify-center text-xl flex-shrink-0`}
+                          aria-hidden="true"
                         >
                           {config.icon}
                         </div>
@@ -672,7 +648,10 @@ export default function CitizenDashboard() {
                             </span>
                           </div>
                         </div>
-                        <span className="text-gray-300 flex-shrink-0 text-lg">
+                        <span
+                          className="text-gray-300 flex-shrink-0 text-lg"
+                          aria-hidden="true"
+                        >
                           →
                         </span>
                       </div>
@@ -693,50 +672,15 @@ export default function CitizenDashboard() {
               )}
             </div>
           )}
-
-          {/* Push notification permission prompt */}
-          {notificationStatus === "denied" && (
-            <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-xl flex items-center gap-3">
-              <span className="text-2xl flex-shrink-0">🔔</span>
-              <div className="flex-1 text-sm">
-                <p className="font-medium text-orange-800">
-                  Enable push notifications
-                </p>
-                <p className="text-orange-600 text-xs">
-                  Allow notifications to receive emergency alerts even when
-                  this tab is in the background.
-                </p>
-              </div>
-              <button
-                onClick={setupFCM}
-                className="px-3 py-1.5 bg-orange-500 text-white rounded-lg text-xs font-medium hover:bg-orange-600 flex-shrink-0"
-              >
-                Enable
-              </button>
-            </div>
-          )}
-
-          {notificationStatus === "granted" && (
-            <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3">
-              <span className="text-2xl flex-shrink-0">✅</span>
-              <div className="text-sm">
-                <p className="font-medium text-green-800">
-                  Push notifications active
-                </p>
-                <p className="text-green-600 text-xs">
-                  You will receive emergency alerts even when this tab is in
-                  the background.
-                </p>
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* DB ERROR */}
+        {/* ==================== DB ERROR ==================== */}
         {dbError && (
           <div className="bg-red-50 border border-red-200 rounded-2xl p-6 mb-8">
             <div className="flex items-start gap-4">
-              <div className="text-3xl flex-shrink-0">⚠️</div>
+              <div className="text-3xl flex-shrink-0" aria-hidden="true">
+                ⚠️
+              </div>
               <div className="flex-1">
                 <h3 className="font-bold text-red-700 mb-1">
                   Database Connection Issue
@@ -759,13 +703,17 @@ export default function CitizenDashboard() {
           </div>
         )}
 
-        {/* QUICK ACTIONS */}
+        {/* ==================== QUICK ACTIONS ==================== */}
         <div className="grid md:grid-cols-3 gap-6 mb-8">
           <Link
             href="/citizen/report"
             className="bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white p-6 rounded-2xl text-left transition shadow-lg group"
+            aria-label="Submit a new city report"
           >
-            <div className="text-4xl mb-3 group-hover:scale-110 transition-transform">
+            <div
+              className="text-4xl mb-3 group-hover:scale-110 transition-transform"
+              aria-hidden="true"
+            >
               📝
             </div>
             <h3 className="text-xl font-bold mb-1">Submit Report</h3>
@@ -775,8 +723,12 @@ export default function CitizenDashboard() {
           <Link
             href="/citizen/my-reports"
             className="bg-gradient-to-br from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white p-6 rounded-2xl text-left transition shadow-lg group"
+            aria-label="View my submitted reports"
           >
-            <div className="text-4xl mb-3 group-hover:scale-110 transition-transform">
+            <div
+              className="text-4xl mb-3 group-hover:scale-110 transition-transform"
+              aria-hidden="true"
+            >
               📋
             </div>
             <h3 className="text-xl font-bold mb-1">My Reports</h3>
@@ -788,8 +740,12 @@ export default function CitizenDashboard() {
           <Link
             href="/public/resolved"
             className="bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white p-6 rounded-2xl text-left transition shadow-lg group"
+            aria-label="View resolved city issues"
           >
-            <div className="text-4xl mb-3 group-hover:scale-110 transition-transform">
+            <div
+              className="text-4xl mb-3 group-hover:scale-110 transition-transform"
+              aria-hidden="true"
+            >
               ✅
             </div>
             <h3 className="text-xl font-bold mb-1">Resolved Issues</h3>
@@ -799,31 +755,31 @@ export default function CitizenDashboard() {
           </Link>
         </div>
 
-        {/* STATS */}
+        {/* ==================== STATS ==================== */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm text-center">
-            <div className="text-3xl mb-2">📝</div>
+            <div className="text-3xl mb-2" aria-hidden="true">📝</div>
             <div className="text-3xl font-bold text-gray-900">
               {stats.total}
             </div>
             <div className="text-gray-600 text-sm">Total Reports</div>
           </div>
           <div className="bg-green-50 p-6 rounded-xl border border-green-100 shadow-sm text-center">
-            <div className="text-3xl mb-2">✅</div>
+            <div className="text-3xl mb-2" aria-hidden="true">✅</div>
             <div className="text-3xl font-bold text-green-700">
               {stats.resolved}
             </div>
             <div className="text-green-600 text-sm">Resolved</div>
           </div>
           <div className="bg-yellow-50 p-6 rounded-xl border border-yellow-100 shadow-sm text-center">
-            <div className="text-3xl mb-2">⏳</div>
+            <div className="text-3xl mb-2" aria-hidden="true">⏳</div>
             <div className="text-3xl font-bold text-yellow-700">
               {stats.pending}
             </div>
             <div className="text-yellow-600 text-sm">Pending</div>
           </div>
           <div className="bg-blue-50 p-6 rounded-xl border border-blue-100 shadow-sm text-center">
-            <div className="text-3xl mb-2">🔄</div>
+            <div className="text-3xl mb-2" aria-hidden="true">🔄</div>
             <div className="text-3xl font-bold text-blue-700">
               {stats.inProgress}
             </div>
@@ -831,7 +787,7 @@ export default function CitizenDashboard() {
           </div>
         </div>
 
-        {/* RECENT REPORTS */}
+        {/* ==================== RECENT REPORTS ==================== */}
         <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100 mb-8">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-bold text-gray-900">
@@ -852,14 +808,14 @@ export default function CitizenDashboard() {
             </div>
           ) : dbError ? (
             <div className="text-center py-8">
-              <div className="text-4xl mb-2">⚠️</div>
+              <div className="text-4xl mb-2" aria-hidden="true">⚠️</div>
               <p className="text-gray-500 text-sm">
                 Reports unavailable — database connection error
               </p>
             </div>
           ) : recentReports.length === 0 ? (
             <div className="text-center py-8">
-              <div className="text-6xl mb-4">📭</div>
+              <div className="text-6xl mb-4" aria-hidden="true">📭</div>
               <p className="text-gray-600 mb-4">
                 No reports yet. Start by submitting one!
               </p>
@@ -877,7 +833,7 @@ export default function CitizenDashboard() {
                   key={report.id}
                   className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition"
                 >
-                  <div className="text-2xl">
+                  <div className="text-2xl" aria-hidden="true">
                     {report.category === "Water"
                       ? "💧"
                       : report.category === "Waste"
@@ -896,14 +852,11 @@ export default function CitizenDashboard() {
                     </p>
                     <p className="text-sm text-gray-500">
                       {report.category} •{" "}
-                      {new Date(report.createdAt).toLocaleDateString(
-                        "en-US",
-                        {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        }
-                      )}
+                      {new Date(report.createdAt).toLocaleDateString("en-US", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })}
                     </p>
                   </div>
                   <span
@@ -935,13 +888,17 @@ export default function CitizenDashboard() {
           )}
         </div>
 
-        {/* QUICK LINKS */}
+        {/* ==================== QUICK LINKS ==================== */}
         <div className="grid md:grid-cols-2 gap-4 mb-8">
           <Link
             href="/public/activity"
             className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition flex items-center gap-4"
+            aria-label="View Public Activity Feed"
           >
-            <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-2xl">
+            <div
+              className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-2xl"
+              aria-hidden="true"
+            >
               📢
             </div>
             <div>
@@ -955,8 +912,12 @@ export default function CitizenDashboard() {
           <Link
             href="/public/resolved"
             className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition flex items-center gap-4"
+            aria-label="Rate resolved city issues"
           >
-            <div className="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center text-2xl">
+            <div
+              className="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center text-2xl"
+              aria-hidden="true"
+            >
               ⭐
             </div>
             <div>
@@ -968,11 +929,14 @@ export default function CitizenDashboard() {
           </Link>
         </div>
 
-        {/* STATISTICS */}
+        {/* ==================== STATISTICS ==================== */}
         {!dbError && allReports.length > 0 && (
           <div className="mt-8">
             <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+              <div
+                className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center"
+                aria-hidden="true"
+              >
                 <span className="text-xl">📊</span>
               </div>
               <div>
@@ -994,7 +958,7 @@ export default function CitizenDashboard() {
 
         {!dbError && allReports.length === 0 && !reportsLoading && (
           <div className="bg-white rounded-2xl shadow-sm p-10 border border-gray-100 text-center">
-            <div className="text-6xl mb-4">📊</div>
+            <div className="text-6xl mb-4" aria-hidden="true">📊</div>
             <h3 className="text-xl font-bold text-gray-900 mb-2">
               No Statistics Yet
             </h3>
@@ -1011,13 +975,16 @@ export default function CitizenDashboard() {
         )}
       </main>
 
-      {/* NOTICE DETAIL MODAL */}
+      {/* ==================== NOTICE DETAIL MODAL ==================== */}
       {selectedNotice && (
         <div
           className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
           onClick={(e) => {
             if (e.target === e.currentTarget) setSelectedNotice(null)
           }}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Emergency notice: ${selectedNotice.title}`}
         >
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
             {(() => {
@@ -1031,7 +998,9 @@ export default function CitizenDashboard() {
                   >
                     <div className="flex justify-between items-start">
                       <div className="flex items-center gap-3">
-                        <div className="text-4xl">{config.icon}</div>
+                        <div className="text-4xl" aria-hidden="true">
+                          {config.icon}
+                        </div>
                         <div>
                           <span
                             className={`px-2 py-0.5 text-xs rounded-full font-bold ${config.color}`}
@@ -1048,6 +1017,7 @@ export default function CitizenDashboard() {
                       <button
                         onClick={() => setSelectedNotice(null)}
                         className="w-8 h-8 bg-white/60 rounded-full flex items-center justify-center hover:bg-white transition text-gray-600 font-bold flex-shrink-0"
+                        aria-label="Close notice"
                       >
                         ✕
                       </button>
@@ -1063,6 +1033,7 @@ export default function CitizenDashboard() {
                         {selectedNotice.message}
                       </p>
                     </div>
+
                     <div className="grid grid-cols-2 gap-3">
                       <div className="bg-gray-50 rounded-xl p-3">
                         <p className="text-xs text-gray-400 mb-1">Sent On</p>
@@ -1107,14 +1078,15 @@ export default function CitizenDashboard() {
                         </p>
                       </div>
                     </div>
+
                     {selectedNotice.severity === "critical" && (
                       <div className="bg-red-50 border border-red-200 rounded-xl p-4">
                         <p className="text-red-700 text-sm font-semibold mb-1">
                           ⚠️ Critical Emergency
                         </p>
                         <p className="text-red-600 text-xs">
-                          Please follow instructions from local authorities
-                          and stay safe.
+                          Please follow instructions from local authorities and
+                          stay safe.
                         </p>
                       </div>
                     )}
@@ -1135,12 +1107,19 @@ export default function CitizenDashboard() {
         </div>
       )}
 
-      {/* PUSH NOTIFICATION POPUP */}
+      {/* ==================== PUSH NOTIFICATION POPUP ==================== */}
       {pushPopup && (
-        <div className="fixed top-4 right-4 z-[9999] max-w-sm w-full">
+        <div
+          className="fixed top-4 right-4 z-[9999] max-w-sm w-full"
+          role="alert"
+          aria-live="assertive"
+        >
           <div className="bg-white rounded-2xl shadow-2xl border-l-4 border-red-500 p-4">
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center text-xl flex-shrink-0">
+              <div
+                className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
+                aria-hidden="true"
+              >
                 🚨
               </div>
               <div className="flex-1 min-w-0">
@@ -1157,6 +1136,7 @@ export default function CitizenDashboard() {
               <button
                 onClick={() => setPushPopup(null)}
                 className="text-gray-400 hover:text-gray-600 flex-shrink-0 font-bold text-lg leading-none"
+                aria-label="Dismiss notification"
               >
                 ✕
               </button>
