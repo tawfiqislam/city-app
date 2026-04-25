@@ -9,68 +9,77 @@ datasource db {
 }
 
 model User {
-  id            String                @id @default(cuid())
-  email         String                @unique
-  password      String
-  name          String?
-  phone         String?
-  avatar        String?
-  address       String?
-  city          String?
-  role          String                @default("citizen")
-  departmentId  String?
-  department    Department?           @relation(fields: [departmentId], references: [id])
-  reports       Report[]
-  assignments   Assignment[]
-  schedules     MaintenanceSchedule[]
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
+  id           String   @id @default(cuid())
+  email        String   @unique
+  password     String
+  name         String?
+  phone        String?
+  avatar       String?
+  address      String?
+  city         String?
+  role         String   @default("citizen")
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  
+  // ADD THIS LINE:
+  fcmToken     String?  @unique
 
-  @@index([email])
-  @@index([role])
-  @@index([departmentId])
+  reports      Report[]
+  assignments  Assignment[]
+  schedules    MaintenanceSchedule[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model Department {
-  id          String                @id @default(cuid())
-  name        String                @unique
+  id          String   @id @default(cuid())
+  name        String   @unique
   description String?
   icon        String?
   color       String?
+
   officers    User[]
   reports     Report[]
   schedules   MaintenanceSchedule[]
-  createdAt   DateTime              @default(now())
-  updatedAt   DateTime              @updatedAt
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([name])
 }
 
 model Report {
-  id               String       @id @default(cuid())
-  title            String
-  description      String       @db.Text
-  category         String
-  location         String
-  city             String?
-  division         String?
-  latitude         Float?
-  longitude        Float?
-  status           String       @default("pending")
-  priority         String       @default("medium")
-  isEmergency      Boolean      @default(false)
-  imageUrl         String?
+  id              String   @id @default(cuid())
+  title           String
+  description     String   @db.Text
+  category        String
+  location        String
+  city            String?
+  division        String?
+  latitude        Float?
+  longitude       Float?
+
+  status          String   @default("pending")
+  priority        String   @default("medium")
+  isEmergency     Boolean  @default(false)
+
+  imageUrl        String?
   resolvedImageUrl String?
-  userId           String
-  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  departmentId     String?
-  department       Department?  @relation(fields: [departmentId], references: [id])
-  assignments      Assignment[]
-  rating           Int?
-  feedback         String?      @db.Text
-  resolvedAt       DateTime?
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  departmentId    String?
+  department      Department? @relation(fields: [departmentId], references: [id])
+
+  assignments     Assignment[]
+
+  rating          Int?
+  feedback        String?  @db.Text
+  resolvedAt      DateTime?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([userId])
   @@index([status])
@@ -82,37 +91,46 @@ model Report {
 }
 
 model Assignment {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   reportId    String
-  report      Report    @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  report      Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
   officerId   String
-  officer     User      @relation(fields: [officerId], references: [id], onDelete: Cascade)
-  assignedAt  DateTime  @default(now())
+  officer     User     @relation(fields: [officerId], references: [id], onDelete: Cascade)
+
+  assignedAt  DateTime @default(now())
   claimedAt   DateTime?
   completedAt DateTime?
-  notes       String?   @db.Text
+
+  notes       String?  @db.Text
 
   @@index([reportId])
   @@index([officerId])
 }
 
 model MaintenanceSchedule {
-  id            String     @id @default(cuid())
-  title         String
-  description   String?    @db.Text
+  id           String   @id @default(cuid())
+  title        String
+  description  String?  @db.Text
+
   scheduledDate DateTime
   endDate       DateTime?
-  status        String     @default("scheduled")
-  priority      String     @default("medium")
-  departmentId  String
-  department    Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  assignedTo    String
-  officer       User       @relation(fields: [assignedTo], references: [id], onDelete: Cascade)
-  location      String?
-  city          String?
-  notes         String?    @db.Text
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+
+  status       String   @default("scheduled")
+  priority     String   @default("medium")
+
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  assignedTo   String
+  officer      User     @relation(fields: [assignedTo], references: [id], onDelete: Cascade)
+
+  location     String?
+  city         String?
+  notes        String?  @db.Text
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([departmentId])
   @@index([assignedTo])
@@ -121,15 +139,17 @@ model MaintenanceSchedule {
 }
 
 model EmergencyBroadcast {
-  id          String   @id @default(cuid())
-  title       String
-  message     String   @db.Text
-  severity    String
-  targetCity  String?
-  targetAll   Boolean  @default(true)
-  sentAt      DateTime @default(now())
-  sentBy      String
-  recipients  Int      @default(0)
+  id         String   @id @default(cuid())
+  title      String
+  message    String   @db.Text
+  severity   String
+
+  targetCity String?
+  targetAll  Boolean  @default(true)
+
+  sentAt     DateTime @default(now())
+  sentBy     String
+  recipients Int      @default(0)
 
   @@index([sentAt])
   @@index([severity])

@@ -10,15 +10,38 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const token = request.headers.get("authorization")?.split(" ")[1]
-
-    if (!token) {
+    const authHeader = request.headers.get("authorization")
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const payload = jwt.verify(token, JWT_SECRET) as { userId: string }
+    const token = authHeader.split(" ")[1]
+
+    let payload: any
+    try {
+      payload = jwt.verify(token, JWT_SECRET)
+    } catch {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
+    }
+
+    // Only citizens can submit ratings
+    if (payload.role !== "citizen") {
+      return NextResponse.json(
+        { error: "Only citizens can submit ratings" },
+        { status: 403 }
+      )
+    }
+
     const { rating, feedback } = await request.json()
 
+    if (!rating || rating < 1 || rating > 5) {
+      return NextResponse.json(
+        { error: "Rating must be between 1 and 5" },
+        { status: 400 }
+      )
+    }
+
+    // Check report exists and is resolved
     const report = await prisma.report.findUnique({
       where: { id: params.id },
     })
@@ -27,27 +50,27 @@ export async function POST(
       return NextResponse.json({ error: "Report not found" }, { status: 404 })
     }
 
-    if (report.userId !== payload.userId) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
-
     if (report.status !== "resolved") {
       return NextResponse.json(
-        { error: "Can only rate resolved reports" },
+        { error: "Only resolved reports can be rated" },
         { status: 400 }
       )
     }
 
-    const updatedReport = await prisma.report.update({
+    // Update rating and feedback
+    const updated = await prisma.report.update({
       where: { id: params.id },
-      data: { rating, feedback },
+      data: {
+        rating: Number(rating),
+        feedback: feedback || null,
+      },
     })
 
-    return NextResponse.json({ success: true, report: updatedReport })
-  } catch (error) {
+    return NextResponse.json({ success: true, report: updated })
+  } catch (error: any) {
     console.error("Feedback error:", error)
     return NextResponse.json(
-      { error: "Failed to submit feedback" },
+      { error: "Failed to submit rating" },
       { status: 500 }
     )
   }

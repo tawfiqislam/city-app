@@ -13,6 +13,7 @@ export async function GET() {
         category: true,
         location: true,
         city: true,
+        createdAt: true,
         resolvedAt: true,
         rating: true,
         feedback: true,

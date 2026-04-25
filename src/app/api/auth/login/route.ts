@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server"
-import { PrismaClient } from "@prisma/client"
+import { prisma } from "@/lib/prisma"
 import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
 
-const prisma = new PrismaClient()
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key"
 
 export async function POST(request: Request) {
@@ -56,7 +55,7 @@ export async function POST(request: Request) {
         department: user.department,
       },
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error("Login error:", error)
     return NextResponse.json(
       { error: "Login failed. Please try again." },

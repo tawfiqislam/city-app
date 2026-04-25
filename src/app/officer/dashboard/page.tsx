@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
+import StatisticsCharts from "@/components/StatisticsCharts"
 
 interface Ticket {
   id: string
@@ -50,6 +51,7 @@ const categoryIcons: Record<string, string> = {
   Roads: "🛣️",
   Electricity: "⚡",
   Health: "🏥",
+  Other: "📋",
 }
 
 export default function OfficerDashboard() {
@@ -84,16 +86,15 @@ export default function OfficerDashboard() {
 
       const res = await fetch("/api/officer/tickets", {
         headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
       })
 
       if (!res.ok) {
-        console.error("Failed to fetch tickets")
         setTickets([])
         return
       }
 
       const data = await res.json()
-      console.log("Tickets fetched:", data.tickets?.length)
       setTickets(data.tickets || [])
     } catch (error) {
       console.error("Error:", error)
@@ -108,12 +109,8 @@ export default function OfficerDashboard() {
     if (!confirmed) return
 
     setClaimingId(reportId)
-
     try {
       const token = localStorage.getItem("token")
-
-      console.log("Claiming ticket:", reportId)
-
       const res = await fetch("/api/officer/tickets/claim", {
         method: "POST",
         headers: {
@@ -123,27 +120,17 @@ export default function OfficerDashboard() {
         body: JSON.stringify({ reportId }),
       })
 
-      console.log("Claim response status:", res.status)
-
       const data = await res.json()
-      console.log("Claim response data:", data)
 
       if (res.ok && data.success) {
-        alert("✅ Ticket claimed successfully! Status changed to In Progress.")
-
-        // Close modal if open
+        alert("✅ Ticket claimed successfully!")
         setSelectedTicket(null)
-
-        // Wait a moment then refresh
-        setTimeout(() => {
-          fetchTickets()
-        }, 500)
+        fetchTickets()
       } else {
         alert("❌ " + (data.error || "Failed to claim ticket"))
       }
     } catch (error) {
-      console.error("Claim error:", error)
-      alert("❌ Failed to claim ticket. Please try again.")
+      alert("❌ Failed to claim ticket")
     } finally {
       setClaimingId(null)
     }
@@ -155,12 +142,10 @@ export default function OfficerDashboard() {
   }
 
   const filteredTickets = tickets.filter((ticket) => {
-    // Tab filter
     if (activeTab === "pending" && ticket.status !== "pending") return false
     if (activeTab === "in-progress" && ticket.status !== "in-progress") return false
     if (activeTab === "emergency" && !ticket.isEmergency) return false
 
-    // Search filter
     if (search) {
       const s = search.toLowerCase()
       return (
@@ -170,7 +155,6 @@ export default function OfficerDashboard() {
         ticket.user.name.toLowerCase().includes(s)
       )
     }
-
     return true
   })
 
@@ -186,9 +170,8 @@ export default function OfficerDashboard() {
     router.push("/login")
   }
 
-  // Check if current officer has claimed a ticket
   const isClaimedByMe = (ticket: Ticket) => {
-    return ticket.assignments.some(a => a.officer?.id === user?.id)
+    return ticket.assignments.some((a) => a.officer?.id === user?.id)
   }
 
   if (loading) {
@@ -214,16 +197,18 @@ export default function OfficerDashboard() {
                 <span className="text-xl font-bold text-emerald-600">CityWatch</span>
               </Link>
               <div className="hidden md:block px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
-                👮 Officer Panel
+                Officer Panel 👮
               </div>
             </div>
+
             <div className="flex items-center gap-4">
               <Link
                 href="/officer/maintenance"
                 className="px-4 py-2 text-gray-600 hover:text-emerald-600 font-medium"
               >
-                📅 Maintenance
+                Maintenance 📅
               </Link>
+
               <div className="hidden md:flex items-center gap-3">
                 <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
                   <span className="text-emerald-600 font-bold">
@@ -235,6 +220,7 @@ export default function OfficerDashboard() {
                   <p className="text-xs text-gray-500">{user?.department?.name}</p>
                 </div>
               </div>
+
               <button
                 onClick={logout}
                 className="px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"
@@ -247,10 +233,12 @@ export default function OfficerDashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* Welcome */}
+        {/* Banner */}
         <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl p-8 text-white mb-8">
           <h1 className="text-3xl font-bold mb-2">Welcome, {user?.name}! 👋</h1>
-          <p className="text-emerald-100">Department: {user?.department?.name || "General"}</p>
+          <p className="text-emerald-100">
+            Department: {user?.department?.name || "General"}
+          </p>
         </div>
 
         {/* Stats */}
@@ -269,7 +257,7 @@ export default function OfficerDashboard() {
           ))}
         </div>
 
-        {/* Tabs & Search */}
+        {/* Filters */}
         <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex gap-2 flex-wrap">
@@ -330,7 +318,7 @@ export default function OfficerDashboard() {
                   <div className="flex-1">
                     <div className="flex items-start gap-3 mb-3">
                       <span className="text-2xl mt-1">
-                        {categoryIcons[ticket.category] || "📝"}
+                        {categoryIcons[ticket.category] || "📋"}
                       </span>
                       <div className="flex-1">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -341,15 +329,20 @@ export default function OfficerDashboard() {
                             </span>
                           )}
                         </div>
+
                         <div className="flex gap-2 flex-wrap mb-2">
                           <span className={`px-2 py-1 text-xs rounded-full ${statusColors[ticket.status]}`}>
-                            {ticket.status === "pending" ? "⏳ Pending" :
-                             ticket.status === "in-progress" ? "🔄 In Progress" : "✅ Resolved"}
+                            {ticket.status === "pending"
+                              ? "⏳ Pending"
+                              : ticket.status === "in-progress"
+                              ? "🔄 In Progress"
+                              : "✅ Resolved"}
                           </span>
                           <span className={`px-2 py-1 text-xs rounded-full ${priorityColors[ticket.priority]}`}>
                             {ticket.priority.charAt(0).toUpperCase() + ticket.priority.slice(1)}
                           </span>
                         </div>
+
                         <p className="text-gray-600 line-clamp-2">{ticket.description}</p>
                       </div>
                     </div>
@@ -362,7 +355,6 @@ export default function OfficerDashboard() {
                       <span>📅 {new Date(ticket.createdAt).toLocaleDateString()}</span>
                     </div>
 
-                    {/* Show assigned officer */}
                     {ticket.assignments.length > 0 && (
                       <div className="mt-2 flex items-center gap-2 text-sm text-blue-600">
                         <span>👮 Assigned to: {ticket.assignments[0].officer.name}</span>
@@ -377,7 +369,6 @@ export default function OfficerDashboard() {
 
                   {/* Action Buttons */}
                   <div className="flex gap-2 flex-shrink-0">
-                    {/* Show CLAIM button only for pending tickets */}
                     {ticket.status === "pending" && (
                       <button
                         onClick={() => claimTicket(ticket.id)}
@@ -391,14 +382,13 @@ export default function OfficerDashboard() {
                         }`}
                       >
                         {claimingId === ticket.id
-                          ? "⏳ Claiming..."
+                          ? "Claiming..."
                           : ticket.isEmergency
                           ? "🚨 Claim Now"
                           : "✅ Claim"}
                       </button>
                     )}
 
-                    {/* Show RESOLVE button for in-progress tickets */}
                     {ticket.status === "in-progress" && (
                       <button
                         onClick={() => goToResolvePage(ticket.id)}
@@ -408,12 +398,11 @@ export default function OfficerDashboard() {
                       </button>
                     )}
 
-                    {/* Details button always visible */}
                     <button
                       onClick={() => setSelectedTicket(ticket)}
                       className="px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition whitespace-nowrap"
                     >
-                      👁️ Details
+                      Details
                     </button>
                   </div>
                 </div>
@@ -421,9 +410,23 @@ export default function OfficerDashboard() {
             ))
           )}
         </div>
+
+        {/* Statistics Section */}
+        <div className="mt-8">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
+              <span className="text-xl">📊</span>
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">My Department Statistics</h2>
+              <p className="text-gray-600 text-sm">Chart.js analytics for your tickets</p>
+            </div>
+          </div>
+          <StatisticsCharts role="officer" reports={tickets} userName={user?.name} />
+        </div>
       </main>
 
-      {/* Details Modal */}
+      {/* Modal */}
       {selectedTicket && (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
@@ -432,14 +435,15 @@ export default function OfficerDashboard() {
           }}
         >
           <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className={`p-6 border-b sticky top-0 z-10 ${
-              selectedTicket.isEmergency ? "bg-red-50 border-red-200" : "bg-gray-50 border-gray-200"
-            }`}>
+            <div
+              className={`p-6 border-b sticky top-0 z-10 ${
+                selectedTicket.isEmergency ? "bg-red-50 border-red-200" : "bg-gray-50 border-gray-200"
+              }`}
+            >
               <div className="flex justify-between items-start">
                 <div>
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-2xl">{categoryIcons[selectedTicket.category] || "📝"}</span>
+                    <span className="text-2xl">{categoryIcons[selectedTicket.category] || "📋"}</span>
                     {selectedTicket.isEmergency && (
                       <span className="px-2 py-1 bg-red-500 text-white text-xs rounded-full animate-pulse">
                         🚨 EMERGENCY
@@ -457,29 +461,26 @@ export default function OfficerDashboard() {
               </div>
             </div>
 
-            {/* Modal Body */}
             <div className="p-6 space-y-6">
-              {/* Status Badges */}
               <div className="flex gap-3 flex-wrap">
                 <span className={`px-3 py-1 text-sm rounded-full ${statusColors[selectedTicket.status]}`}>
-                  {selectedTicket.status === "pending" ? "⏳ Pending" :
-                   selectedTicket.status === "in-progress" ? "🔄 In Progress" : "✅ Resolved"}
+                  {selectedTicket.status}
                 </span>
                 <span className={`px-3 py-1 text-sm rounded-full ${priorityColors[selectedTicket.priority]}`}>
-                  {selectedTicket.priority.charAt(0).toUpperCase() + selectedTicket.priority.slice(1)} Priority
+                  {selectedTicket.priority} Priority
                 </span>
                 <span className="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded-full">
                   {selectedTicket.category}
                 </span>
               </div>
 
-              {/* Description */}
               <div>
                 <h3 className="font-bold text-gray-900 mb-2">📄 Description</h3>
-                <p className="text-gray-700 bg-gray-50 p-4 rounded-xl">{selectedTicket.description}</p>
+                <p className="text-gray-700 bg-gray-50 p-4 rounded-xl">
+                  {selectedTicket.description}
+                </p>
               </div>
 
-              {/* Location Details */}
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="bg-gray-50 p-4 rounded-xl">
                   <h3 className="font-bold text-gray-900 mb-1">📍 Location</h3>
@@ -489,36 +490,8 @@ export default function OfficerDashboard() {
                   <h3 className="font-bold text-gray-900 mb-1">🏙️ City</h3>
                   <p className="text-gray-700">{selectedTicket.city}</p>
                 </div>
-                <div className="bg-gray-50 p-4 rounded-xl">
-                  <h3 className="font-bold text-gray-900 mb-1">🏢 Department</h3>
-                  <p className="text-gray-700">{selectedTicket.department?.name || "Not Assigned"}</p>
-                </div>
-                <div className="bg-gray-50 p-4 rounded-xl">
-                  <h3 className="font-bold text-gray-900 mb-1">📅 Submitted</h3>
-                  <p className="text-gray-700">{new Date(selectedTicket.createdAt).toLocaleString()}</p>
-                </div>
               </div>
 
-              {/* Citizen Info */}
-              <div className="bg-blue-50 p-4 rounded-xl border border-blue-200">
-                <h3 className="font-bold text-gray-900 mb-3">👤 Reported By</h3>
-                <div className="grid md:grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-500">Name</p>
-                    <p className="font-medium text-gray-900">{selectedTicket.user.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Email</p>
-                    <p className="font-medium text-gray-900">{selectedTicket.user.email}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Phone</p>
-                    <p className="font-medium text-gray-900">{selectedTicket.user.phone}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Image */}
               {selectedTicket.imageUrl && (
                 <div>
                   <h3 className="font-bold text-gray-900 mb-2">📷 Photo</h3>
@@ -529,32 +502,8 @@ export default function OfficerDashboard() {
                   />
                 </div>
               )}
-
-              {/* Assignment Info */}
-              {selectedTicket.assignments.length > 0 && (
-                <div className="bg-green-50 p-4 rounded-xl border border-green-200">
-                  <h3 className="font-bold text-gray-900 mb-3">👮 Assignment</h3>
-                  {selectedTicket.assignments.map((a: any, i: number) => (
-                    <div key={i} className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center text-white font-bold">
-                        {a.officer?.name?.charAt(0)}
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-900">
-                          {a.officer?.name}
-                          {a.officer?.id === user?.id && " (You)"}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          Claimed: {a.claimedAt ? new Date(a.claimedAt).toLocaleString() : "Pending"}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
 
-            {/* Modal Actions */}
             <div className="p-6 border-t border-gray-200 flex gap-4 sticky bottom-0 bg-white">
               <button
                 onClick={() => setSelectedTicket(null)}
@@ -565,23 +514,11 @@ export default function OfficerDashboard() {
 
               {selectedTicket.status === "pending" && (
                 <button
-                  onClick={() => {
-                    claimTicket(selectedTicket.id)
-                  }}
+                  onClick={() => claimTicket(selectedTicket.id)}
                   disabled={claimingId === selectedTicket.id}
-                  className={`flex-1 py-3 rounded-xl font-medium transition ${
-                    claimingId === selectedTicket.id
-                      ? "bg-gray-400 text-white cursor-not-allowed"
-                      : selectedTicket.isEmergency
-                      ? "bg-red-600 text-white hover:bg-red-700"
-                      : "bg-emerald-600 text-white hover:bg-emerald-700"
-                  }`}
+                  className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition"
                 >
-                  {claimingId === selectedTicket.id
-                    ? "⏳ Claiming..."
-                    : selectedTicket.isEmergency
-                    ? "🚨 Claim Emergency"
-                    : "✅ Claim Ticket"}
+                  {claimingId === selectedTicket.id ? "Claiming..." : "✅ Claim Ticket"}
                 </button>
               )}
 

@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server"
-import { PrismaClient } from "@prisma/client"
+import { prisma } from "@/lib/prisma"
 import bcrypt from "bcryptjs"
-
-const prisma = new PrismaClient()
+import { sendRegistrationWelcomeEmail } from "@/lib/mailer"
 
 export async function POST(request: Request) {
   try {
@@ -47,12 +46,28 @@ export async function POST(request: Request) {
       },
     })
 
+    // Send welcome email to the new citizen's actual email
+    const emailResult = await sendRegistrationWelcomeEmail({
+      email: user.email,
+      name: user.name,
+    })
+
+    if (emailResult.success) {
+      console.log(`Welcome email sent to new citizen: ${user.email}`)
+    } else {
+      console.warn(
+        `Welcome email failed for ${user.email}:`,
+        emailResult.error
+      )
+    }
+
     return NextResponse.json({
       success: true,
       message: "Registration successful",
       user,
+      emailSent: emailResult.success,
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error("Registration error:", error)
     return NextResponse.json(
       { error: "Registration failed. Please try again." },

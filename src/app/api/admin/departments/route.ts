@@ -5,6 +5,8 @@ const prisma = new PrismaClient()
 
 export async function GET() {
   try {
+    console.log("Fetching departments...")
+    
     const departments = await prisma.department.findMany({
       include: {
         officers: {
@@ -22,13 +24,18 @@ export async function GET() {
           },
         },
       },
+      orderBy: {
+        name: "asc",
+      },
     })
+
+    console.log(`Found ${departments.length} departments`)
 
     return NextResponse.json({ departments })
   } catch (error) {
     console.error("Fetch departments error:", error)
     return NextResponse.json(
-      { error: "Failed to fetch departments" },
+      { error: "Failed to fetch departments", details: String(error) },
       { status: 500 }
     )
   }

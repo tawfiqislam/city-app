@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { PrismaClient } from "@prisma/client"
 import jwt from "jsonwebtoken"
 
+const prisma = new PrismaClient()
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key"
 
 export async function GET(request: Request) {
   try {
     const authHeader = request.headers.get("authorization")
-
+    
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
@@ -17,32 +18,41 @@ export async function GET(request: Request) {
     let payload: any
     try {
       payload = jwt.verify(token, JWT_SECRET)
-    } catch {
+    } catch (err) {
       return NextResponse.json({ error: "Invalid token" }, { status: 401 })
     }
 
+    if (payload.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
+
     const reports = await prisma.report.findMany({
-      where: { userId: payload.userId },
       include: {
-        department: { select: { name: true } },
+        user: {
+          select: { name: true, email: true, phone: true },
+        },
+        department: {
+          select: { id: true, name: true },
+        },
         assignments: {
           include: {
-            officer: { select: { name: true } },
+            officer: {
+              select: { id: true, name: true, email: true },
+            },
           },
         },
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: [
+        { isEmergency: "desc" },
+        { createdAt: "desc" },
+      ],
     })
 
     return NextResponse.json({ reports })
-  } catch (error: any) {
-    console.error("Fetch citizen reports error:", error)
-
+  } catch (error) {
+    console.error("Fetch all reports error:", error)
     return NextResponse.json(
-      {
-        error: "Failed to fetch reports",
-        details: error.message || "Database connection error",
-      },
+      { error: "Failed to fetch reports" },
       { status: 500 }
     )
   }
